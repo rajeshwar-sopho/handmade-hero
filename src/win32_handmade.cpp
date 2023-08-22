@@ -29,6 +29,8 @@ internal void render_wierd_gradient(int x_offset, int y_offset) {
                                   0  1  2  3
                 Pixel in memory: 00 00 00 00
                                  BB GG RR xx
+                last byte is just empty as this processors are designed to read
+                4 byte windows faster
                 LITTLE ENDIAN ARCHITECTURE: lower byte is placed first
 
                 0x xxBBGGRR --> 
@@ -65,6 +67,9 @@ internal void win32_resize_DIB_section(int width, int height) {
     bitmap_info.bmiHeader.biCompression = BI_RGB;
     
     int bitmap_memory_size = BYTES_PER_PIXEL * bitmap_width * bitmap_height;
+    // virtual alloc is faster as malloc will go through a bunch of code and eventually call
+    // virtualalloc, as eventually we need memory in the form of pages where a page is just a byte
+    // windows allocates virtual memory to the program not actual memory for safety
     bitmap_memory = VirtualAlloc(0, bitmap_memory_size, MEM_COMMIT, PAGE_READWRITE);
 }
 
@@ -73,6 +78,7 @@ internal void win32_update_window(HDC device_context, RECT *client_rect) {
     int window_height = client_rect->bottom - client_rect->top;
 
 
+    // its going to copy bitmap memory object to the window and its in rgb colors
     StretchDIBits( device_context,
         /*
         x, y, width, height,
@@ -88,6 +94,7 @@ internal void win32_update_window(HDC device_context, RECT *client_rect) {
 }
 
 LRESULT CALLBACK mainwindow_callback(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+    // this function is a call back that processes messages received by the window
     LRESULT result = 0;
     switch(Msg) {
         case WM_SIZE:
@@ -127,6 +134,7 @@ LRESULT CALLBACK mainwindow_callback(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM 
         default:
         {
             // OutputDebugStringA("WM_SIZE");
+            // for messages that you dont want to process or want window's default behavior call this
             result = DefWindowProc(hWnd, Msg, wParam, lParam) ;
         } break;
     }
@@ -155,6 +163,8 @@ int WINAPI WinMain(
     // wc.hIcon = ;
     wc.lpszClassName = "HandmadeHeroWindowClass";
     
+    // usually there is no hard need to release the resources and just closing is fine
+    // as windows will clear that automatically for us when someone will close the app
     if (RegisterClassA(&wc)) {
         // create a handle to the window wc
         HWND main_window_handle = CreateWindowExA(
@@ -189,6 +199,7 @@ int WINAPI WinMain(
                     DispatchMessage(&message);
                 }
 
+                // this populates the bitmap memory object that we created
                 render_wierd_gradient(x_offset, y_offset);
 
                 ++x_offset;
@@ -202,6 +213,7 @@ int WINAPI WinMain(
                 int window_width = client_rect.right - client_rect.left;
                 int window_height = client_rect.bottom - client_rect.top;
 
+                // this takes the memory object and populate the client rectangle
                 win32_update_window(device_context, &client_rect);
                 ReleaseDC(main_window_handle, device_context);
             }
