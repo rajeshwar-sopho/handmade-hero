@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h>
+#include <Xinput.h>
 
 #define internal static
 #define local_persist static
@@ -21,6 +22,41 @@ struct win32_offscreen_buffer {
 // TODO: global variable for now
 global_variable bool running;
 global_variable win32_offscreen_buffer global_back_buffer;
+
+// NOTE: Support for XInputSetState
+// if we do it like this then if want to change the function signature then we can just change in one place
+#define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
+
+// we are making this in order to create a function pointer
+typedef X_INPUT_SET_STATE(x_input_set_state);
+
+// this is a stub function that we can use to initialize our function pointer
+X_INPUT_SET_STATE(x_input_set_state_stub) {
+    return 0;
+}
+
+// this is the function pointer
+global_variable x_input_set_state *XInputSetState_ = x_input_set_state_stub;
+
+// we are setting function pointer to XInputSetState to avoid errors when its not supported 
+#define XInputSetState XInputSetState_
+
+// NOTE: Support for XInputGetState
+#define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE* pState)
+typedef X_INPUT_GET_STATE(x_input_get_state);
+X_INPUT_GET_STATE(x_input_get_state_stub) {
+    return 0;
+}
+global_variable x_input_get_state *XInputGetState_ = x_input_get_state_stub;
+#define XInputGetState XInputGetState_
+
+internal void win32_loadxinput(void) {
+    HMODULE x_input_lib = LoadLibraryA("XInput1_4.dll");
+    if (x_input_lib) {
+        XInputGetState = (x_input_get_state*)GetProcAddress(x_input_lib, "XInputGetState");
+        XInputSetState = (x_input_set_state*)GetProcAddress(x_input_lib, "XInputSetState");
+    }
+}
 
 struct win32_window_dimension {
     int height;
@@ -186,6 +222,7 @@ int WINAPI WinMain(
     PSTR lpCmdLine, 
     int nCmdShow)
 {
+    win32_loadxinput();
     
     // DisplayResourceNAMessageBox();
     WNDCLASSA wc = {};
@@ -232,11 +269,47 @@ int WINAPI WinMain(
                     DispatchMessage(&message);
                 }
 
+                // TODO: Should we pool this more frequently
+                // So lets say if we are getting input 5 then getting input 30, if that's the case that
+                // means there is a gap in our code for taking messages, we can poll more often to eliminate this
+
+                // This is for xbox controller and playstation controller won't work with this
+                for (DWORD controller_index = 0; controller_index < XUSER_MAX_COUNT; controller_index++) {
+                    XINPUT_STATE controller_state;
+                    if (XInputGetState(controller_index, &controller_state) == ERROR_SUCCESS) {
+                        // NOTE: This controller is plugged in
+                        // TODO: See if ControllerState.dwPacketNumber increments too rapidly
+                        XINPUT_GAMEPAD *game_pad = &controller_state.Gamepad;
+
+                        bool up = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
+                        bool down = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
+                        bool left = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
+                        bool right = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
+                        bool start = (game_pad->wButtons & XINPUT_GAMEPAD_START);
+                        bool back = (game_pad->wButtons & XINPUT_GAMEPAD_BACK);
+                        bool left_shoulder = (game_pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
+                        bool right_shoulder = (game_pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+                        bool a_button = (game_pad->wButtons & XINPUT_GAMEPAD_A);
+                        bool b_button = (game_pad->wButtons & XINPUT_GAMEPAD_B);
+                        bool x_button = (game_pad->wButtons & XINPUT_GAMEPAD_X);
+                        bool y_button = (game_pad->wButtons & XINPUT_GAMEPAD_Y);
+                        
+                        uint16_t stick_x = game_pad->sThumbLX;
+                        uint16_t stick_y = game_pad->sThumbLY;
+
+                        if (a_button) {
+                            y_offset += 3;
+                        }
+
+                    }
+                }
+
+                // TODO: Try to implement this for taking input from the PS5 controller
+
                 // this populates the bitmap memory object that we created
                 render_wierd_gradient(global_back_buffer, x_offset, y_offset);
 
                 ++x_offset;
-                y_offset += 3;
                 
 
                 HDC device_context = GetDC(main_window);
