@@ -19,6 +19,9 @@ global_variable int bitmap_height;
 
 internal void render_wierd_gradient(int x_offset, int y_offset) {
     int pitch = bitmap_width * BYTES_PER_PIXEL;
+
+    // doing this makes the pointer math easier as it prevents c from multiplying 
+    // the values with the size of variable
     uint8_t *row = (uint8_t*) bitmap_memory;
     for (int y=0; y < bitmap_height; ++y) {
         // uint32_t *pixel = (uint32_t*) row;
@@ -59,6 +62,10 @@ internal void win32_resize_DIB_section(int width, int height) {
     bitmap_height = height;
     bitmap_width = width;
 
+    // this formula and details about the bitmap header are mentioned on below page
+    // https://learn.microsoft.com/en-us/windows/win32/gdi/device-independent-bitmaps
+    int bitmap_memory_size = BYTES_PER_PIXEL * bitmap_width * bitmap_height;
+
     bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
     bitmap_info.bmiHeader.biWidth = bitmap_width;
     bitmap_info.bmiHeader.biHeight = -bitmap_height; // this will make windows draw from top to down se the biheight on msdn
@@ -66,7 +73,6 @@ internal void win32_resize_DIB_section(int width, int height) {
     bitmap_info.bmiHeader.biBitCount = 32;
     bitmap_info.bmiHeader.biCompression = BI_RGB;
     
-    int bitmap_memory_size = BYTES_PER_PIXEL * bitmap_width * bitmap_height;
     // virtual alloc is faster as malloc will go through a bunch of code and eventually call
     // virtualalloc, as eventually we need memory in the form of pages where a page is just a byte
     // windows allocates virtual memory to the program not actual memory for safety
@@ -79,13 +85,15 @@ internal void win32_update_window(HDC device_context, RECT *client_rect) {
 
 
     // its going to copy bitmap memory object to the window and its in rgb colors
+    // since bitmap_height and width are global and every time we resize the window
+    // we are setting them equal to the h and w of the window, they are same
     StretchDIBits( device_context,
         /*
         x, y, width, height,
         x, y, width, height,
         */
-        0, 0, bitmap_width, bitmap_height,
-        0, 0, window_width, window_height,
+        0, 0, window_width, window_height, // which is pointed by the device_context
+        0, 0, bitmap_width, bitmap_height, // these are the dimensions for memory where bitmap data is stored
         bitmap_memory,
         &bitmap_info,
         DIB_RGB_COLORS,
@@ -121,13 +129,12 @@ LRESULT CALLBACK mainwindow_callback(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM 
         } break;
         case WM_PAINT:
         {
+            // so the paint object is giving us both, DC and the rectangle to draw on
             PAINTSTRUCT paint;
             HDC device_context = BeginPaint(hWnd, &paint);
 
-            RECT client_rect;
-            GetClientRect(hWnd, &client_rect);
-
-            win32_update_window(device_context, &client_rect);
+            // render_wierd_gradient(100, 0);
+            win32_update_window(device_context, &paint.rcPaint);
 
             EndPaint(hWnd, &paint);
         } break;
