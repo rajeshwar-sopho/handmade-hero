@@ -9,25 +9,46 @@
 
 // typedef uint8_t uint8;
 
+struct win32_offscreen_buffer {
+    BITMAPINFO info;
+    void *memory;
+    int width;
+    int height;
+    int pitch;
+    int memory_size;
+};
+
 // TODO: global variable for now
 global_variable bool running;
+global_variable win32_offscreen_buffer global_back_buffer;
 
-global_variable BITMAPINFO bitmap_info;
-global_variable void *bitmap_memory;
-global_variable int bitmap_width;
-global_variable int bitmap_height;
+struct win32_window_dimension {
+    int height;
+    int width;
+};
 
-internal void render_wierd_gradient(int x_offset, int y_offset) {
-    int pitch = bitmap_width * BYTES_PER_PIXEL;
 
+internal win32_window_dimension win32_get_window_dim(HWND window) {
+    RECT client_rect;
+    GetClientRect(window, &client_rect);
+    win32_window_dimension dimension;
+
+    dimension.height = client_rect.bottom - client_rect.top;
+    dimension.width = client_rect.right - client_rect.left;
+
+    return dimension;
+} 
+
+
+internal void render_wierd_gradient(win32_offscreen_buffer buffer, int x_offset, int y_offset) {
     // doing this makes the pointer math easier as it prevents c from multiplying 
     // the values with the size of variable
-    uint8_t *row = (uint8_t*) bitmap_memory;
-    for (int y=0; y < bitmap_height; ++y) {
+    uint8_t *row = (uint8_t*) buffer.memory;
+    for (int y=0; y < buffer.height; ++y) {
         // uint32_t *pixel = (uint32_t*) row;
         uint32_t *pixel = (uint32_t*) row;
         
-        for (int x=0; x < bitmap_width; ++x) {
+        for (int x=0; x < buffer.width; ++x) {
             /*
                                   0  1  2  3
                 Pixel in memory: 00 00 00 00
@@ -46,43 +67,49 @@ internal void render_wierd_gradient(int x_offset, int y_offset) {
             *pixel++ = ((red << 16) | (green << 8) | blue);
         }
 
-        row += pitch;
+        row += buffer.pitch;
     } 
 }
 
-
-internal void win32_resize_DIB_section(int width, int height) {
+// this function is called only when window is getting resized
+// in this function we are changing valuse of the buffer itself therefore passing by reference
+internal void win32_resize_DIB_section(win32_offscreen_buffer *buffer, int window_width, int window_height) {
     // TODO: Bulletproof this.
     // Maybe don't free first, free after, then free first if that fails
 
-    if (bitmap_memory) {
-        VirtualFree(bitmap_memory, 0, MEM_RELEASE);
+    if (buffer->memory) {
+        VirtualFree(buffer->memory, 0, MEM_RELEASE);
     }
 
-    bitmap_height = height;
-    bitmap_width = width;
+    buffer->height = window_height;
+    buffer->width = window_width;
 
+    buffer->pitch = buffer->width * BYTES_PER_PIXEL;
     // this formula and details about the bitmap header are mentioned on below page
     // https://learn.microsoft.com/en-us/windows/win32/gdi/device-independent-bitmaps
-    int bitmap_memory_size = BYTES_PER_PIXEL * bitmap_width * bitmap_height;
+    buffer->memory_size = BYTES_PER_PIXEL * buffer->width * buffer->height;
 
-    bitmap_info.bmiHeader.biSize = sizeof(bitmap_info.bmiHeader);
-    bitmap_info.bmiHeader.biWidth = bitmap_width;
-    bitmap_info.bmiHeader.biHeight = -bitmap_height; // this will make windows draw from top to down se the biheight on msdn
-    bitmap_info.bmiHeader.biPlanes = 1;
-    bitmap_info.bmiHeader.biBitCount = 32;
-    bitmap_info.bmiHeader.biCompression = BI_RGB;
+    buffer->info.bmiHeader.biSize = sizeof(buffer->info.bmiHeader);
+    buffer->info.bmiHeader.biWidth = buffer->width;
+    buffer->info.bmiHeader.biHeight = -buffer->height; // this will make windows draw from top to down se the biheight on msdn
+    buffer->info.bmiHeader.biPlanes = 1;
+    buffer->info.bmiHeader.biBitCount = 32;
+    buffer->info.bmiHeader.biCompression = BI_RGB;
     
     // virtual alloc is faster as malloc will go through a bunch of code and eventually call
     // virtualalloc, as eventually we need memory in the form of pages where a page is just a byte
     // windows allocates virtual memory to the program not actual memory for safety
-    bitmap_memory = VirtualAlloc(0, bitmap_memory_size, MEM_COMMIT, PAGE_READWRITE);
+    buffer->memory = VirtualAlloc(0, buffer->memory_size, MEM_COMMIT, PAGE_READWRITE);
 }
 
-internal void win32_update_window(HDC device_context, RECT *client_rect) {
-    int window_width = client_rect->right - client_rect->left;
-    int window_height = client_rect->bottom - client_rect->top;
 
+// it's probably better to pass small structs or variables just by reference as compiler will make
+// them inline to optimize them we can replace RECT *client_rect to RECT client_rect
+
+// this function will get called frequently
+internal void win32_update_window(win32_offscreen_buffer buffer, HDC device_context, int window_width, int window_height) {
+
+    // TODO: Aspect ratio fix
 
     // its going to copy bitmap memory object to the window and its in rgb colors
     // since bitmap_height and width are global and every time we resize the window
@@ -93,25 +120,20 @@ internal void win32_update_window(HDC device_context, RECT *client_rect) {
         x, y, width, height,
         */
         0, 0, window_width, window_height, // which is pointed by the device_context
-        0, 0, bitmap_width, bitmap_height, // these are the dimensions for memory where bitmap data is stored
-        bitmap_memory,
-        &bitmap_info,
+        0, 0, buffer.width, buffer.height, // these are the dimensions for memory where bitmap data is stored
+        buffer.memory,
+        &buffer.info,
         DIB_RGB_COLORS,
         SRCCOPY
     );
 }
 
-LRESULT CALLBACK mainwindow_callback(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARAM lParam) {
     // this function is a call back that processes messages received by the window
     LRESULT result = 0;
     switch(Msg) {
         case WM_SIZE:
         {
-            RECT client_rect;
-            GetClientRect(hWnd, &client_rect);
-            LONG height = client_rect.bottom - client_rect.top;
-            LONG width = client_rect.right - client_rect.left;
-            win32_resize_DIB_section(width, height);
         } break;
         case WM_DESTROY:
         {
@@ -131,18 +153,20 @@ LRESULT CALLBACK mainwindow_callback(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM 
         {
             // so the paint object is giving us both, DC and the rectangle to draw on
             PAINTSTRUCT paint;
-            HDC device_context = BeginPaint(hWnd, &paint);
+            HDC device_context = BeginPaint(window, &paint);
+
+            win32_window_dimension dimension = win32_get_window_dim(window);
 
             // render_wierd_gradient(100, 0);
-            win32_update_window(device_context, &paint.rcPaint);
+            win32_update_window(global_back_buffer, device_context, dimension.width, dimension.height);
 
-            EndPaint(hWnd, &paint);
+            EndPaint(window, &paint);
         } break;
         default:
         {
             // OutputDebugStringA("WM_SIZE");
             // for messages that you dont want to process or want window's default behavior call this
-            result = DefWindowProc(hWnd, Msg, wParam, lParam) ;
+            result = DefWindowProc(window, Msg, wParam, lParam) ;
         } break;
     }
 
@@ -162,9 +186,11 @@ int WINAPI WinMain(
     PSTR lpCmdLine, 
     int nCmdShow)
 {
+    
     // DisplayResourceNAMessageBox();
     WNDCLASSA wc = {};
-    wc.style = CS_OWNDC | CS_VREDRAW | CS_HREDRAW;
+    win32_resize_DIB_section(&global_back_buffer, 1440, 1080);
+    wc.style = CS_VREDRAW | CS_HREDRAW;
     wc.lpfnWndProc = mainwindow_callback;
     wc.hInstance = hInstance;
     // wc.hIcon = ;
@@ -174,7 +200,7 @@ int WINAPI WinMain(
     // as windows will clear that automatically for us when someone will close the app
     if (RegisterClassA(&wc)) {
         // create a handle to the window wc
-        HWND main_window_handle = CreateWindowExA(
+        HWND main_window = CreateWindowExA(
             0,
             wc.lpszClassName,
             "Handmade Hero",
@@ -189,7 +215,7 @@ int WINAPI WinMain(
             0
         );
 
-        if (main_window_handle) {
+        if (main_window) {
             running = true;
             int x_offset, y_offset;
             x_offset = y_offset = 0;
@@ -207,22 +233,18 @@ int WINAPI WinMain(
                 }
 
                 // this populates the bitmap memory object that we created
-                render_wierd_gradient(x_offset, y_offset);
+                render_wierd_gradient(global_back_buffer, x_offset, y_offset);
 
                 ++x_offset;
-                y_offset -= 2;
+                y_offset += 3;
                 
 
-                HDC device_context = GetDC(main_window_handle);
-                RECT client_rect;
-                GetClientRect(main_window_handle, &client_rect);
-
-                int window_width = client_rect.right - client_rect.left;
-                int window_height = client_rect.bottom - client_rect.top;
+                HDC device_context = GetDC(main_window);
+                win32_window_dimension dimension = win32_get_window_dim(main_window);
 
                 // this takes the memory object and populate the client rectangle
-                win32_update_window(device_context, &client_rect);
-                ReleaseDC(main_window_handle, device_context);
+                win32_update_window(global_back_buffer, device_context, dimension.width, dimension.height);
+                ReleaseDC(main_window, device_context);
             }
         } else {
             // TODO: logging
