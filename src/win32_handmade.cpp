@@ -33,7 +33,7 @@ typedef X_INPUT_SET_STATE(x_input_set_state);
 
 // this is a stub function that we can use to initialize our function pointer
 X_INPUT_SET_STATE(x_input_set_state_stub) {
-    return 0;
+    return ERROR_DEVICE_NOT_CONNECTED;
 }
 
 // this is the function pointer
@@ -46,13 +46,17 @@ global_variable x_input_set_state *XInputSetState_ = x_input_set_state_stub;
 #define X_INPUT_GET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_STATE* pState)
 typedef X_INPUT_GET_STATE(x_input_get_state);
 X_INPUT_GET_STATE(x_input_get_state_stub) {
-    return 0;
+    return ERROR_DEVICE_NOT_CONNECTED;
 }
 global_variable x_input_get_state *XInputGetState_ = x_input_get_state_stub;
 #define XInputGetState XInputGetState_
 
 internal void win32_loadxinput(void) {
     HMODULE x_input_lib = LoadLibraryA("XInput1_4.dll");
+    if (x_input_lib) {
+        x_input_lib = LoadLibraryA("XInput1_3.dll");
+    }
+
     if (x_input_lib) {
         XInputGetState = (x_input_get_state*)GetProcAddress(x_input_lib, "XInputGetState");
         XInputSetState = (x_input_set_state*)GetProcAddress(x_input_lib, "XInputSetState");
@@ -77,15 +81,15 @@ internal win32_window_dimension win32_get_window_dim(HWND window) {
 } 
 
 
-internal void render_wierd_gradient(win32_offscreen_buffer buffer, int x_offset, int y_offset) {
+internal void render_wierd_gradient(win32_offscreen_buffer *buffer, int x_offset, int y_offset) {
     // doing this makes the pointer math easier as it prevents c from multiplying 
     // the values with the size of variable
-    uint8_t *row = (uint8_t*) buffer.memory;
-    for (int y=0; y < buffer.height; ++y) {
+    uint8_t *row = (uint8_t*) buffer->memory;
+    for (int y=0; y < buffer->height; ++y) {
         // uint32_t *pixel = (uint32_t*) row;
         uint32_t *pixel = (uint32_t*) row;
         
-        for (int x=0; x < buffer.width; ++x) {
+        for (int x=0; x < buffer->width; ++x) {
             /*
                                   0  1  2  3
                 Pixel in memory: 00 00 00 00
@@ -104,7 +108,7 @@ internal void render_wierd_gradient(win32_offscreen_buffer buffer, int x_offset,
             *pixel++ = ((red << 16) | (green << 8) | blue);
         }
 
-        row += buffer.pitch;
+        row += buffer->pitch;
     } 
 }
 
@@ -144,7 +148,7 @@ internal void win32_resize_DIB_section(win32_offscreen_buffer *buffer, int windo
 // them inline to optimize them we can replace RECT *client_rect to RECT client_rect
 
 // this function will get called frequently
-internal void win32_update_window(win32_offscreen_buffer buffer, HDC device_context, int window_width, int window_height) {
+internal void win32_update_window(win32_offscreen_buffer *buffer, HDC device_context, int window_width, int window_height) {
 
     // TODO: Aspect ratio fix
 
@@ -157,9 +161,9 @@ internal void win32_update_window(win32_offscreen_buffer buffer, HDC device_cont
         x, y, width, height,
         */
         0, 0, window_width, window_height, // which is pointed by the device_context
-        0, 0, buffer.width, buffer.height, // these are the dimensions for memory where bitmap data is stored
-        buffer.memory,
-        &buffer.info,
+        0, 0, buffer->width, buffer->height, // these are the dimensions for memory where bitmap data is stored
+        buffer->memory,
+        &buffer->info,
         DIB_RGB_COLORS,
         SRCCOPY
     );
@@ -186,6 +190,58 @@ LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARA
         {
             OutputDebugStringA("WM_ACTIVATEAPP");
         } break;
+        case WM_SYSKEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        {   
+            uint32_t vkcode = wParam;
+            bool was_down = (lParam & (1 << 30)) != 0;
+            bool is_down = (lParam & (1 << 31)) == 0;
+
+            if (was_down != is_down) {
+                if (vkcode == 'W') {
+
+                } else if (vkcode == 'A') {
+
+                } else if (vkcode == 'S') {
+                    
+                } else if (vkcode == 'W') {
+                    
+                } else if (vkcode == 'D') {
+                    
+                } else if (vkcode == VK_UP) {
+                    
+                } else if (vkcode == VK_DOWN) {
+                    
+                } else if (vkcode == VK_LEFT) {
+                    
+                } else if (vkcode == VK_RIGHT) {
+                    
+                } else if (vkcode == 'Q') {
+                    
+                } else if (vkcode == 'E') {
+                    
+                } else if (vkcode == 'R') {
+                    
+                } else if (vkcode == 'C') {
+                    
+                } else if (vkcode == 'V') {
+                    
+                } else if (vkcode == VK_LSHIFT) {
+                    
+                } else if (vkcode == VK_LCONTROL) {
+                    
+                } else if (vkcode == VK_SPACE) {
+                    
+                } else if (vkcode == VK_ESCAPE) {
+                    
+                }
+
+                
+            }
+
+        } break;
         case WM_PAINT:
         {
             // so the paint object is giving us both, DC and the rectangle to draw on
@@ -195,7 +251,7 @@ LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARA
             win32_window_dimension dimension = win32_get_window_dim(window);
 
             // render_wierd_gradient(100, 0);
-            win32_update_window(global_back_buffer, device_context, dimension.width, dimension.height);
+            win32_update_window(&global_back_buffer, device_context, dimension.width, dimension.height);
 
             EndPaint(window, &paint);
         } break;
@@ -295,12 +351,15 @@ int WINAPI WinMain(
                         bool x_button = (game_pad->wButtons & XINPUT_GAMEPAD_X);
                         bool y_button = (game_pad->wButtons & XINPUT_GAMEPAD_Y);
                         
-                        uint16_t stick_x = game_pad->sThumbLX;
-                        uint16_t stick_y = game_pad->sThumbLY;
+                        int16_t stick_x = game_pad->sThumbLX;
+                        int16_t stick_y = game_pad->sThumbLY;
 
-                        if (a_button) {
-                            y_offset += 3;
-                        }
+                        x_offset += stick_x >> 12;
+                        y_offset -= stick_y >> 12;
+
+                        // if (a_button) {
+                        //     y_offset += 3;
+                        // }
                     }
                 }
 
@@ -308,17 +367,25 @@ int WINAPI WinMain(
                 // we can use ds-4 windows and hidhide to emulate xbox controller
                 // https://ds4-windows.com/get-started/
 
-                // this populates the bitmap memory object that we created
-                render_wierd_gradient(global_back_buffer, x_offset, y_offset);
+                // TODO: This still is just a work around try to implement fully featured PS5 controller support (P.S. Write a Driver from scratch)
 
-                ++x_offset;
-                
+                // Uncomment these lines for vibration
+                // XINPUT_VIBRATION vibration;
+                // vibration.wLeftMotorSpeed = 60000;
+                // vibration.wRightMotorSpeed = 60000;
+
+                // XInputSetState(0, &vibration);
+
+                // this populates the bitmap memory object that we created
+                render_wierd_gradient(&global_back_buffer, x_offset, y_offset);
+
+                // ++x_offset;
 
                 HDC device_context = GetDC(main_window);
                 win32_window_dimension dimension = win32_get_window_dim(main_window);
 
                 // this takes the memory object and populate the client rectangle
-                win32_update_window(global_back_buffer, device_context, dimension.width, dimension.height);
+                win32_update_window(&global_back_buffer, device_context, dimension.width, dimension.height);
                 ReleaseDC(main_window, device_context);
             }
         } else {
