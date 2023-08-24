@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <Xinput.h>
 
 #define internal static
@@ -300,11 +301,12 @@ int WINAPI WinMain(
                         if (a_button) {
                             y_offset += 3;
                         }
-
                     }
                 }
 
-                // TODO: Try to implement this for taking input from the PS5 controller
+                // // TODO:  Try to implement this for taking input from the PS5 controller
+                // we can use ds-4 windows and hidhide to emulate xbox controller
+                // https://ds4-windows.com/get-started/
 
                 // this populates the bitmap memory object that we created
                 render_wierd_gradient(global_back_buffer, x_offset, y_offset);
