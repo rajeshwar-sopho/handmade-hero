@@ -2,6 +2,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <Xinput.h>
+#include <DSound.h>
+
+// https://github.com/Renardjojo/PetForDesktop: pet for desktop (build something similar)
 
 #define internal static
 #define local_persist static
@@ -10,6 +13,8 @@
 #define BYTES_PER_PIXEL 4
 
 // typedef uint8_t uint8;
+
+typedef uint32_t bool_32;
 
 struct win32_offscreen_buffer {
     BITMAPINFO info;
@@ -21,7 +26,7 @@ struct win32_offscreen_buffer {
 };
 
 // TODO: global variable for now
-global_variable bool running;
+global_variable bool global_running;
 global_variable win32_offscreen_buffer global_back_buffer;
 
 // NOTE: Support for XInputSetState
@@ -50,6 +55,11 @@ X_INPUT_GET_STATE(x_input_get_state_stub) {
 }
 global_variable x_input_get_state *XInputGetState_ = x_input_get_state_stub;
 #define XInputGetState XInputGetState_
+
+
+#define DIRECT_SOUND_CREATE(name) HRESULT WINAPI name(LPCGUID pcGuidDevice, LPDIRECTSOUND *ppDS, LPUNKNOWN pUnkOuter)
+typedef DIRECT_SOUND_CREATE(direct_sound_create);
+
 
 internal void win32_loadxinput(void) {
     HMODULE x_input_lib = LoadLibraryA("XInput1_4.dll");
@@ -178,12 +188,12 @@ LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARA
         } break;
         case WM_DESTROY:
         {
-            running = false;
+            global_running = false;
             OutputDebugStringA("WM_DESTROY");
         } break;
         case WM_CLOSE:
         {
-            running = false;
+            global_running = false;
             OutputDebugStringA("WM_CLOSE");
         } break;
         case WM_ACTIVATEAPP:
@@ -196,8 +206,8 @@ LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARA
         case WM_KEYUP:
         {   
             uint32_t vkcode = wParam;
-            bool was_down = (lParam & (1 << 30)) != 0;
-            bool is_down = (lParam & (1 << 31)) == 0;
+            bool_32 was_down = (lParam & (1 << 30)) != 0;
+            bool_32 is_down = (lParam & (1 << 31)) == 0;
 
             if (was_down != is_down) {
                 if (vkcode == 'W') {
@@ -238,7 +248,14 @@ LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARA
                     
                 }
 
-                
+                // this will result in either 0 or 1 as we are doing and of bits 
+                // so we dont care about telling the compiler that its bool
+                // if we keep this then compiler will shove this in either 0 or 1
+                bool_32 alt_key_was_down = lParam & (1 << 29);
+                if (vkcode == VK_F4 && alt_key_was_down) {
+                    global_running = false;
+                }
+
             }
 
         } break;
@@ -267,6 +284,68 @@ LRESULT CALLBACK mainwindow_callback(HWND window, UINT Msg, WPARAM wParam, LPARA
 }
 
 
+internal void win32_init_dsound(HWND window, int32_t samples_per_second, int32_t buffer_size) {
+    // Load the library
+    HMODULE dsound_library = LoadLibraryA("dsound.dll");
+
+    if (dsound_library) {
+        // get a direct sound object
+        direct_sound_create *DirectSoundCreate = (direct_sound_create *)GetProcAddress(dsound_library, "DirectSoundCreate");
+        
+        LPDIRECTSOUND direct_sound;
+        if (DirectSoundCreate && DirectSoundCreate(0, &direct_sound, 0)) {
+            
+            WAVEFORMATEX wave_format = {};
+            wave_format.wFormatTag = WAVE_FORMAT_PCM;
+            wave_format.nChannels = 2;
+            wave_format.wBitsPerSample = 16;
+            wave_format.nSamplesPerSec = samples_per_second;
+            wave_format.nBlockAlign = (wave_format.nChannels * wave_format.wBitsPerSample) / 8;
+            wave_format.nAvgBytesPerSec = wave_format.nSamplesPerSec * wave_format.nBlockAlign;
+            wave_format.cbSize = 0;
+
+            if (SUCCEEDED(direct_sound->SetCooperativeLevel(window, DSSCL_PRIORITY))) {
+                // by convention we zero all struct values before setting values
+                // below line set the memory size(first in struct) and set rest to 0
+                DSBUFFERDESC buffer_description = {};
+                buffer_description.dwFlags = DSBCAPS_PRIMARYBUFFER;
+                buffer_description.dwSize = sizeof(buffer_description);
+                buffer_description.dwBufferBytes = 0;
+
+
+                // create a primary buffer
+                LPDIRECTSOUNDBUFFER primary_buffer;
+                if (SUCCEEDED(direct_sound->CreateSoundBuffer(&buffer_description, &primary_buffer, 0))) {
+                    
+
+                    if (SUCCEEDED(primary_buffer->SetFormat(&wave_format))) {
+                        
+                    } else {
+                        // TODO: diagonastic
+                    }
+                }
+                
+            } else {
+                // TODO: Diagnostics
+            }
+
+            // create a secondary buffer
+            DSBUFFERDESC buffer_description = {};
+            buffer_description.dwFlags = 0;
+            buffer_description.dwSize = sizeof(buffer_description);
+            buffer_description.dwBufferBytes = buffer_size;
+            buffer_description.lpwfxFormat = &wave_format;
+
+            LPDIRECTSOUNDBUFFER secondary_buffer;
+            if (SUCCEEDED(direct_sound->CreateSoundBuffer(&buffer_description, &secondary_buffer, 0))) {
+                // start it playing 
+            }
+        }
+
+    } else {
+        // TODO: Diagnostics
+    }
+}
 
 // they stick in the kernel code so we can call functions from there
 // requirement and library is mentioned in the msdn page at the bottom
@@ -310,16 +389,19 @@ int WINAPI WinMain(
         );
 
         if (main_window) {
-            running = true;
+            global_running = true;
             int x_offset, y_offset;
             x_offset = y_offset = 0;
+
+            win32_init_dsound(main_window, 48000, 48000*sizeof(int16_t)*2);
+
             // get message
-            while (running) {
+            while (global_running) {
                 MSG message;
                 // peek message loop when there is no message it will allow us to run instead of blocking
                 while(PeekMessageA(&message, 0, 0, 0, PM_REMOVE)) {
                     if (message.message == WM_QUIT) {
-                        running = false;
+                        global_running = false;
                     }
 
                     TranslateMessage(&message);
