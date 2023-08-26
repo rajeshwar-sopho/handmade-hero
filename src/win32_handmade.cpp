@@ -197,6 +197,8 @@ struct win32_sound_output {
     int bytes_per_sample;
     int secondary_buffer_size;
     int volume;
+    real32 t_sine;
+    int latency_sample_count;
 };
 
 
@@ -392,28 +394,30 @@ internal void win32_fill_sound_buffer(win32_sound_output *sound_output, DWORD by
             // A4 note. That means per cycle we have 48k/440 samples = y, we know that in sine wave
             // 1 cycle is 2*pie long, that means 1 sample is 2*pie/y long, so if current pos is x
             // then angle will be 2*pie*x/y
-            real32 t = 2.0f*FLOAT_PI*((real32)sound_output->running_sample_index / (real32)sound_output->wave_samples_pre_period);
-            real32 sine_value = sinf(t);
+            // real32 t = 2.0f*FLOAT_PI*((real32)sound_output->running_sample_index / (real32)sound_output->wave_samples_pre_period);
+            real32 sine_value = sinf(sound_output->t_sine);
             int16_t sample_value = (int16_t)(sine_value * sound_output->volume);
             
             // int16_t sample_value = ((running_sample_index++ / half_wave_samples_pre_period) % 2)? volume : -volume; 
             *sample_out++ = sample_value; // LEFT
             *sample_out++ = sample_value; // RIGHT
          
+            sound_output->t_sine += 2.0f*FLOAT_PI*1.0f / (real32)sound_output->wave_samples_pre_period;
             ++sound_output->running_sample_index;
         }
 
         sample_out = (int16_t*)region2;
         DWORD region2_sample_count = region2_size/sound_output->bytes_per_sample;
         for (DWORD sample_index = 0; sample_index < region2_sample_count; ++sample_index) {
-            real32 t = 2.0f*FLOAT_PI*((real32)sound_output->running_sample_index / (real32)sound_output->wave_samples_pre_period);
-            real32 sine_value = sinf(t);
+            // real32 t = 2.0f*FLOAT_PI*((real32)sound_output->running_sample_index / (real32)sound_output->wave_samples_pre_period);
+            real32 sine_value = sinf(sound_output->t_sine);
             int16_t sample_value = (int16_t)(sine_value * sound_output->volume);
             
             // int16_t sample_value = ((running_sample_index++ / half_wave_samples_pre_period) % 2) ? volume : -volume; 
             *sample_out++ = sample_value;
             *sample_out++ = sample_value;
 
+            sound_output->t_sine += 2.0f*FLOAT_PI*1.0f / (real32)sound_output->wave_samples_pre_period;
             ++sound_output->running_sample_index;
         }
         
@@ -478,10 +482,12 @@ int WINAPI WinMain(
             sound_output.bytes_per_sample = sizeof(int16_t)*2;
             sound_output.secondary_buffer_size = sound_output.samples_per_second * sound_output.bytes_per_sample;
             sound_output.volume = 1000;
+            sound_output.latency_sample_count = sound_output.samples_per_second / 15;
+            sound_output.t_sine = 0;
 
             win32_init_dsound(main_window, sound_output.samples_per_second, sound_output.secondary_buffer_size);
 
-            win32_fill_sound_buffer(&sound_output, 0, sound_output.secondary_buffer_size);
+            win32_fill_sound_buffer(&sound_output, 0, sound_output.latency_sample_count * sound_output.bytes_per_sample);
             global_secondary_buffer->Play(0, 0, DSBPLAY_LOOPING);
 
             // get message
@@ -528,6 +534,9 @@ int WINAPI WinMain(
                         x_offset += stick_x >> 12;
                         y_offset -= stick_y >> 12;
 
+                        sound_output.tone_hz = 512 + (int)(256.0f*((real32)stick_y / 30000.0f));
+                        sound_output.wave_samples_pre_period = sound_output.samples_per_second/sound_output.tone_hz;
+
                         // if (a_button) {
                         //     y_offset += 3;
                         // }
@@ -558,12 +567,16 @@ int WINAPI WinMain(
                     DWORD byte_to_lock = (sound_output.running_sample_index * sound_output.bytes_per_sample) % sound_output.secondary_buffer_size;
                     DWORD bytes_to_write;
 
-                    // TODO: We need a more accurate chech than byte_to_lock == play_cursor
-                    if (byte_to_lock > play_cursor) {
+                    DWORD target_cursor = (play_cursor + 
+                        (sound_output.latency_sample_count * sound_output.bytes_per_sample)) %
+                        sound_output.secondary_buffer_size;
+
+                    // TODO: We need a more accurate chech than byte_to_lock == target_cursor
+                    if (byte_to_lock > target_cursor) {
                         bytes_to_write = sound_output.secondary_buffer_size - byte_to_lock;
-                        bytes_to_write += play_cursor;
+                        bytes_to_write += target_cursor;
                     } else {
-                        bytes_to_write = play_cursor - byte_to_lock;
+                        bytes_to_write = target_cursor - byte_to_lock;
                     }
                     
                     win32_fill_sound_buffer(&sound_output, byte_to_lock, bytes_to_write);
