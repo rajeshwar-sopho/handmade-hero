@@ -28,6 +28,8 @@ struct win32_offscreen_buffer {
 // TODO: global variable for now
 global_variable bool global_running;
 global_variable win32_offscreen_buffer global_back_buffer;
+global_variable LPDIRECTSOUNDBUFFER global_secondary_buffer;
+
 
 // NOTE: Support for XInputSetState
 // if we do it like this then if want to change the function signature then we can just change in one place
@@ -293,7 +295,7 @@ internal void win32_init_dsound(HWND window, int32_t samples_per_second, int32_t
         direct_sound_create *DirectSoundCreate = (direct_sound_create *)GetProcAddress(dsound_library, "DirectSoundCreate");
         
         LPDIRECTSOUND direct_sound;
-        if (DirectSoundCreate && DirectSoundCreate(0, &direct_sound, 0)) {
+        if (DirectSoundCreate && SUCCEEDED(DirectSoundCreate(0, &direct_sound, 0))) {
             
             WAVEFORMATEX wave_format = {};
             wave_format.wFormatTag = WAVE_FORMAT_PCM;
@@ -336,8 +338,7 @@ internal void win32_init_dsound(HWND window, int32_t samples_per_second, int32_t
             buffer_description.dwBufferBytes = buffer_size;
             buffer_description.lpwfxFormat = &wave_format;
 
-            LPDIRECTSOUNDBUFFER secondary_buffer;
-            if (SUCCEEDED(direct_sound->CreateSoundBuffer(&buffer_description, &secondary_buffer, 0))) {
+            if (SUCCEEDED(direct_sound->CreateSoundBuffer(&buffer_description, &global_secondary_buffer, 0))) {
                 // start it playing 
             }
         }
@@ -390,10 +391,35 @@ int WINAPI WinMain(
 
         if (main_window) {
             global_running = true;
+            // this is for graphics test
             int x_offset, y_offset;
             x_offset = y_offset = 0;
 
-            win32_init_dsound(main_window, 48000, 48000*sizeof(int16_t)*2);
+            // this is for sound test
+            int samples_per_second = 48000;
+            // middle c note on piano tone hz: 256
+            // a4 note on piano tone hz: 440
+            int tone_hz = 256; // this comes from middle c on a piano
+            // this is a variable to keep track of out position in the wave 
+            // this should wrap when overflowed
+            uint32_t running_sample_index = 0;
+            int square_wave_counter = 0;
+            // we have 48000 samples in a second, if tone frequency is 256
+            // then per period we have 48000/256 = 187.5 samples in half period
+            // we have 187.5/2 = 93.75 samples, to determine if its high or low
+            // we divide curr position (running_sample_index) by half the no of  
+            // samples in period eg for 784/93 = 8.43 which means it covered 
+            // 8 half cycles and because 8 is even that means its high
+            // eg 2 for 63/93 = 0.something 0 is even that means high
+            int square_wave_samples_pre_period = samples_per_second / tone_hz;
+            int bytes_per_sample = sizeof(int16_t)*2;
+            int half_square_wave_samples_pre_period = square_wave_samples_pre_period / 2;
+            int secondary_buffer_size = samples_per_second*bytes_per_sample;
+            int volume = 1000;
+
+            win32_init_dsound(main_window, samples_per_second, secondary_buffer_size);
+
+            global_secondary_buffer->Play(0, 0, DSBPLAY_LOOPING);
 
             // get message
             while (global_running) {
@@ -460,6 +486,59 @@ int WINAPI WinMain(
 
                 // this populates the bitmap memory object that we created
                 render_wierd_gradient(&global_back_buffer, x_offset, y_offset);
+
+                DWORD play_cursor;
+                DWORD write_cursor;
+
+                if (SUCCEEDED(global_secondary_buffer->GetCurrentPosition(&play_cursor, &write_cursor))) {
+                    // direct sound output test
+                    DWORD byte_to_lock = (running_sample_index * bytes_per_sample) % secondary_buffer_size;
+                    DWORD bytes_to_write;
+                    if (byte_to_lock > play_cursor) {
+                        bytes_to_write = secondary_buffer_size - byte_to_lock;
+                        bytes_to_write += play_cursor;
+                    } else {
+                        bytes_to_write = play_cursor - byte_to_lock;
+                    }
+                    // int16 int16
+                    // [LEFT RIGTH] LEFT RIGTH LEFT RIGTH LEFT RIGTH 
+                    //
+                    void *region1;
+                    DWORD region1_size;
+                    void *region2;
+                    DWORD region2_size;
+
+
+                    if (SUCCEEDED(global_secondary_buffer->Lock(byte_to_lock, bytes_to_write,
+                        &region1, &region1_size,
+                        &region2, &region2_size,
+                        0
+                    ))) {
+
+                        int16_t *sample_out = (int16_t*)region1;
+                        DWORD region1_sample_count = region1_size/bytes_per_sample;
+
+                        for (DWORD sample_index = 0; sample_index < region1_sample_count; ++sample_index) {
+                            int16_t sample_value = ((running_sample_index++ / half_square_wave_samples_pre_period) % 2)? volume : -volume; 
+                            *sample_out++ = sample_value; // LEFT
+                            *sample_out++ = sample_value; // RIGHT
+                        }
+
+                        sample_out = (int16_t*)region2;
+                        DWORD region2_sample_count = region2_size/bytes_per_sample;
+                        for (DWORD sample_index = 0; sample_index < region2_sample_count; ++sample_index) {
+                            int16_t sample_value = ((running_sample_index++ / half_square_wave_samples_pre_period) % 2) ? volume : -volume; 
+                            *sample_out++ = sample_value;
+                            *sample_out++ = sample_value;
+                        }
+                    }
+
+                    global_secondary_buffer->Unlock(
+                        region1, region1_size,
+                        region2, region2_size);
+
+                }
+
 
                 // ++x_offset;
 
