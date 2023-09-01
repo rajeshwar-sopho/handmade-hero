@@ -32,7 +32,7 @@ struct win32_offscreen_buffer {
 };
 
 // TODO: global variable for now
-global_variable bool global_running;
+global_variable bool_32 global_running;
 global_variable win32_offscreen_buffer global_back_buffer;
 global_variable LPDIRECTSOUNDBUFFER global_secondary_buffer;
 
@@ -71,7 +71,12 @@ typedef DIRECT_SOUND_CREATE(direct_sound_create);
 
 internal void win32_loadxinput(void) {
     HMODULE x_input_lib = LoadLibraryA("XInput1_4.dll");
-    if (x_input_lib) {
+
+    if (!x_input_lib) {
+        x_input_lib = LoadLibraryA("xinput9_1_0.dll");
+    }
+
+    if (!x_input_lib) {
         x_input_lib = LoadLibraryA("XInput1_3.dll");
     }
 
@@ -437,6 +442,13 @@ int WINAPI WinMain(
     PSTR lpCmdLine, 
     int nCmdShow)
 {
+    // this is counts per second made
+    LARGE_INTEGER pref_counter_freq_result;
+    QueryPerformanceFrequency(&pref_counter_freq_result);
+
+    uint64_t pref_counter_freq = pref_counter_freq_result.QuadPart;
+
+
     win32_loadxinput();
     
     // DisplayResourceNAMessageBox();
@@ -447,6 +459,7 @@ int WINAPI WinMain(
     wc.hInstance = hInstance;
     // wc.hIcon = ;
     wc.lpszClassName = "HandmadeHeroWindowClass";
+
     
     // usually there is no hard need to release the resources and just closing is fine
     // as windows will clear that automatically for us when someone will close the app
@@ -490,8 +503,13 @@ int WINAPI WinMain(
             win32_fill_sound_buffer(&sound_output, 0, sound_output.latency_sample_count * sound_output.bytes_per_sample);
             global_secondary_buffer->Play(0, 0, DSBPLAY_LOOPING);
 
-            // get message
+            LARGE_INTEGER last_counter;
+            QueryPerformanceCounter(&last_counter);
+
+            uint64_t last_cycle_count = __rdtsc();
+
             while (global_running) {
+                // get message
                 MSG message;
                 // peek message loop when there is no message it will allow us to run instead of blocking
                 while(PeekMessageA(&message, 0, 0, 0, PM_REMOVE)) {
@@ -515,24 +533,24 @@ int WINAPI WinMain(
                         // TODO: See if ControllerState.dwPacketNumber increments too rapidly
                         XINPUT_GAMEPAD *game_pad = &controller_state.Gamepad;
 
-                        bool up = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
-                        bool down = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
-                        bool left = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
-                        bool right = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
-                        bool start = (game_pad->wButtons & XINPUT_GAMEPAD_START);
-                        bool back = (game_pad->wButtons & XINPUT_GAMEPAD_BACK);
-                        bool left_shoulder = (game_pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
-                        bool right_shoulder = (game_pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
-                        bool a_button = (game_pad->wButtons & XINPUT_GAMEPAD_A);
-                        bool b_button = (game_pad->wButtons & XINPUT_GAMEPAD_B);
-                        bool x_button = (game_pad->wButtons & XINPUT_GAMEPAD_X);
-                        bool y_button = (game_pad->wButtons & XINPUT_GAMEPAD_Y);
+                        bool_32 up = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_UP);
+                        bool_32 down = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_DOWN);
+                        bool_32 left = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_LEFT);
+                        bool_32 right = (game_pad->wButtons & XINPUT_GAMEPAD_DPAD_RIGHT);
+                        bool_32 start = (game_pad->wButtons & XINPUT_GAMEPAD_START);
+                        bool_32 back = (game_pad->wButtons & XINPUT_GAMEPAD_BACK);
+                        bool_32 left_shoulder = (game_pad->wButtons & XINPUT_GAMEPAD_LEFT_SHOULDER);
+                        bool_32 right_shoulder = (game_pad->wButtons & XINPUT_GAMEPAD_RIGHT_SHOULDER);
+                        bool_32 a_button = (game_pad->wButtons & XINPUT_GAMEPAD_A);
+                        bool_32 b_button = (game_pad->wButtons & XINPUT_GAMEPAD_B);
+                        bool_32 x_button = (game_pad->wButtons & XINPUT_GAMEPAD_X);
+                        bool_32 y_button = (game_pad->wButtons & XINPUT_GAMEPAD_Y);
                         
                         int16_t stick_x = game_pad->sThumbLX;
                         int16_t stick_y = game_pad->sThumbLY;
 
-                        x_offset += stick_x >> 12;
-                        y_offset -= stick_y >> 12;
+                        x_offset += stick_x / 4096;
+                        y_offset -= stick_y / 4096;
 
                         sound_output.tone_hz = 512 + (int)(256.0f*((real32)stick_y / 30000.0f));
                         sound_output.wave_samples_pre_period = sound_output.samples_per_second/sound_output.tone_hz;
@@ -590,6 +608,26 @@ int WINAPI WinMain(
                 // this takes the memory object and populate the client rectangle
                 win32_update_window(&global_back_buffer, device_context, dimension.width, dimension.height);
                 ReleaseDC(main_window, device_context);
+
+                // calculating cycles
+                uint64_t end_cycles_count = __rdtsc();
+
+                // this is how many counts it took
+                LARGE_INTEGER end_counter;
+                QueryPerformanceCounter(&end_counter);
+
+                int64_t count_elapsed = end_counter.QuadPart - last_counter.QuadPart;
+                int32_t frame_per_sec = (int32_t)(pref_counter_freq / count_elapsed);
+                int64_t frame_time = ((1000*count_elapsed) / pref_counter_freq);
+                int64_t cycles_elapsed = end_cycles_count - last_cycle_count;
+                int32_t mega_cycles_per_frame = (int32_t)(cycles_elapsed/(1000 * 1000));
+
+                char buffer[250];
+                wsprintfA(buffer, "Frame time %dms, %d FPS Cycles per Frame: %d MHz \n", frame_time, frame_per_sec, mega_cycles_per_frame);
+                OutputDebugStringA(buffer);
+
+                last_counter = end_counter;
+                last_cycle_count = end_cycles_count;
             }
         } else {
             // TODO: logging
