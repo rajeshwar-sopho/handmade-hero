@@ -1,3 +1,24 @@
+/*
+
+    TODO: This is not the final platform layer.
+
+    - Saved games location
+    - Getting a handle to our own exec file
+    - assets loading path
+    - Threading (launching threads)
+    - Raw Input (keyboard and mouse)
+    - Sleep/timeBeginPeriod
+    - ClipCursor for multimonitor support
+    - Full Screen suppoprt
+    - WM_SETCURSOR for cursor visibility
+    - QueryCancleAutoplay
+    - WM_ACTIVEAPP (when we are not the active app)
+    - Blit speed improvements (BitBlit)
+    - Hardware acceleration (OpenGL or Direct3D or both)
+    - Get keyboard layout for french keyboards, international WASD support
+
+*/
+
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -6,6 +27,8 @@
 
 // implement sinf ourself
 #include <math.h>
+
+#include "handmade.cpp"
 
 // https://github.com/Renardjojo/PetForDesktop: pet for desktop (build something similar)
 
@@ -103,37 +126,6 @@ internal win32_window_dimension win32_get_window_dim(HWND window) {
     return dimension;
 } 
 
-
-internal void render_wierd_gradient(win32_offscreen_buffer *buffer, int x_offset, int y_offset) {
-    // doing this makes the pointer math easier as it prevents c from multiplying 
-    // the values with the size of variable
-    uint8_t *row = (uint8_t*) buffer->memory;
-    for (int y=0; y < buffer->height; ++y) {
-        // uint32_t *pixel = (uint32_t*) row;
-        uint32_t *pixel = (uint32_t*) row;
-        
-        for (int x=0; x < buffer->width; ++x) {
-            /*
-                                  0  1  2  3
-                Pixel in memory: 00 00 00 00
-                                 BB GG RR xx
-                last byte is just empty as this processors are designed to read
-                4 byte windows faster
-                LITTLE ENDIAN ARCHITECTURE: lower byte is placed first
-
-                0x xxBBGGRR --> 
-            */
-
-           uint8_t blue = x - x_offset;
-           uint8_t green = y - y_offset;
-           uint8_t red = 0;
-            
-            *pixel++ = ((red << 16) | (green << 8) | blue);
-        }
-
-        row += buffer->pitch;
-    } 
-}
 
 // this function is called only when window is getting resized
 // in this function we are changing valuse of the buffer itself therefore passing by reference
@@ -436,11 +428,17 @@ internal void win32_fill_sound_buffer(win32_sound_output *sound_output, DWORD by
 
 // we ca use getmodulehandle(0) to get hinstance variable that is not proper
 // name search for it on msdn
+// We should rarely use this because this forces us to keep the same controll flow
+// accross all the platforms
+// #if HANDMADE_WIN32
 int WINAPI WinMain(
     HINSTANCE hInstance, 
     HINSTANCE hPrevInstance,
     PSTR lpCmdLine, 
     int nCmdShow)
+// #else
+// int main(int argc, char **argv)
+// #endif
 {
     // this is counts per second made
     LARGE_INTEGER pref_counter_freq_result;
@@ -575,7 +573,13 @@ int WINAPI WinMain(
                 // XInputSetState(0, &vibration);
 
                 // this populates the bitmap memory object that we created
-                render_wierd_gradient(&global_back_buffer, x_offset, y_offset);
+                game_offscreen_buffer game_buffer;
+                game_buffer.height = global_back_buffer.height;
+                game_buffer.width = global_back_buffer.width;
+                game_buffer.pitch = global_back_buffer.pitch;
+                game_buffer.memory = global_back_buffer.memory;
+
+                game_update_and_render(&game_buffer, x_offset, y_offset);
 
                 DWORD play_cursor;
                 DWORD write_cursor;
