@@ -1,6 +1,24 @@
 #include "handmade.h"
 #include <stdint.h>
 
+internal void game_output_sound(game_sound_output_buffer *sound_buffer, int tone_hz) {
+    uint16_t tone_volume = 1000;
+    local_persist real32 t_sine;
+    int wave_samples_pre_period = sound_buffer->samples_per_second/tone_hz;
+
+    int16_t *sample_out = sound_buffer->samples;
+
+    for (DWORD sample_index = 0; sample_index < sound_buffer->sample_count_to_output; ++sample_index) {
+        real32 sine_value = sinf(t_sine);
+        int16_t sample_value = (int16_t)(sine_value * tone_volume);
+        
+        *sample_out++ = sample_value; // LEFT
+        *sample_out++ = sample_value; // RIGHT
+        
+        t_sine += 2.0f*FLOAT_PI*1.0f / wave_samples_pre_period;
+    }
+}
+
 internal void render_wierd_gradient(game_offscreen_buffer *buffer, int x_offset, int y_offset) {
     // doing this makes the pointer math easier as it prevents c from multiplying 
     // the values with the size of variable
@@ -32,6 +50,11 @@ internal void render_wierd_gradient(game_offscreen_buffer *buffer, int x_offset,
     } 
 }
 
-internal void game_update_and_render(game_offscreen_buffer *buffer, int x_offset, int y_offset) {
+internal void game_update_and_render(game_offscreen_buffer *buffer, 
+    int x_offset, int y_offset, game_sound_output_buffer *sound_buffer,
+    int tone_hz) {
+    // TODO: Allow sample offsets here for more robust platform option
+    game_output_sound(sound_buffer, tone_hz);
+
     render_wierd_gradient(buffer, x_offset, y_offset);
 }
