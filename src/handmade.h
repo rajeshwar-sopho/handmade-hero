@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <math.h>
 
 
 #define internal static
@@ -12,12 +13,19 @@ typedef double real64;
 #define BYTES_PER_PIXEL 4
 #define FLOAT_PI 3.14159265358979323846f
 
-/*
-    NOTE: Services that the game provides to the platform
-*/
+#define array_len(array) (sizeof(array) / sizeof((array)[0]))
 
-// THIS TAKES 4 THINGS
-// Timing, controller/keyboard input, bitmap buffer to use, sound buffer to use
+#define kilobytes(value) ((value) * 1024)
+#define megabytes(value) (kilobytes(value) * 1024)
+#define gigabytes(value) (megabytes(value) * 1024)
+#define terabyte(value)  (gigabytes(value) * 1024)
+
+// this just means write into the null pointer thus crashing the program
+#if HANDMADE_SLOW
+#define assert(expression) if(!(expression)) {*(int*)0=0;}
+#else
+#define assert(expression)
+#endif
 
 struct game_offscreen_buffer {
     void *memory;
@@ -30,17 +38,73 @@ struct game_sound_output_buffer {
     int sample_count_to_output;
     int16_t *samples;
     int samples_per_second;
-    int wave_samples_pre_period;
 };
 
-/*
-    NOTE: Services that the paltform layer provides to the game
-*/
+struct win32_sound_output {
+    int samples_per_second;
+    uint32_t running_sample_index;
+    int bytes_per_sample;
+    int secondary_buffer_size;
+    int latency_sample_count;
+};
+
+
+struct game_button_state {
+    int half_transition_count;
+    bool_32 ended_down;
+};
+
+struct game_controller_input {
+    bool_32 is_analog;
+
+    real32 start_x;
+    real32 start_y;
+
+    real32 min_x;
+    real32 min_y;
+
+    real32 max_x;
+    real32 max_y;
+
+    real32 end_x;
+    real32 end_y;
+
+    union {
+        game_button_state buttons[6];
+        struct {
+            game_button_state up;
+            game_button_state down;
+            game_button_state left;
+            game_button_state right;
+            game_button_state left_shoulder;
+            game_button_state right_shoulder;
+        };
+    };
+};
+
+struct game_input {
+    game_controller_input controllers[4];
+};
+
+struct game_memory {
+    bool_32 is_initialised;
+    
+    uint64_t permanent_memory_size;
+    void *permanent_storage;
+
+    uint64_t transient_memory_size;
+    void *transient_storage;  
+};
+
+struct game_state {
+    int x_offset;
+    int y_offset;
+    int tone_hz;
+};
 
 internal void game_update_and_render(
+    game_memory *memory,
+    game_input *digital_input,
     game_offscreen_buffer *buffer, 
-    int x_offset, 
-    int y_offset,
-    game_sound_output_buffer *sound_buffer,
-    int tone_hz
+    game_sound_output_buffer *sound_buffer
 );
