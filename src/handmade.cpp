@@ -51,11 +51,20 @@ internal void game_update_and_render(
     game_state *current_state = (game_state*)memory->permanent_storage;
 
     if (!memory->is_initialised) {
-        current_state->x_offset = 0;
-        current_state->y_offset = 0;
-        current_state->tone_hz = 440;
+      
+      char *filename = __FILE__;
+      char *write_filename = "C:\\Users\\rajes\\somefile.txt";
+      debug_read_file_result bitmap = DEBUGplatform_read_entire_file(filename);
+      if (bitmap.contents) {
+        DEBUGplatform_write_entire_file(write_filename, bitmap.contents_size, bitmap.contents);
+        DEBUGplatform_free_file_memory(bitmap.contents);
+      }
 
-        memory->is_initialised = true;
+      current_state->x_offset = 0;
+      current_state->y_offset = 0;
+      current_state->tone_hz = 440;
+
+      memory->is_initialised = true;
     }
 
 

@@ -1,5 +1,6 @@
 /*
-
+    Planned stuff that should be done
+    [(
     TODO: This is not the final platform layer.
 
     - Saved games location
@@ -16,8 +17,11 @@
     - Blit speed improvements (BitBlit)
     - Hardware acceleration (OpenGL or Direct3D or both)
     - Get keyboard layout for french keyboards, international WASD support
+    )]
 
 */
+
+// header stuff for now
 
 #include <windows.h>
 #include <stdint.h>
@@ -27,9 +31,8 @@
 
 // implement sinf ourself
 #include <math.h>
-
+#include <winnt.h>
 #include "handmade.cpp"
-
 // https://github.com/Renardjojo/PetForDesktop: pet for desktop (build something similar)
 
 #define internal static
@@ -59,6 +62,7 @@ global_variable win32_offscreen_buffer global_back_buffer;
 global_variable LPDIRECTSOUNDBUFFER global_secondary_buffer;
 
 
+// loading xinput and direct sound library
 // NOTE: Support for XInputSetState
 // if we do it like this then if want to change the function signature then we can just change in one place
 #define X_INPUT_SET_STATE(name) DWORD WINAPI name(DWORD dwUserIndex, XINPUT_VIBRATION* pVibration)
@@ -113,6 +117,77 @@ struct win32_window_dimension {
     int width;
 };
 
+
+internal void DEBUGplatform_free_file_memory(void *memory)
+{
+  if (memory) {
+    VirtualFree(memory, 0, MEM_RELEASE);
+  }
+}
+
+internal debug_read_file_result DEBUGplatform_read_entire_file(char *filename)
+{
+
+  debug_read_file_result result = {}; 
+  HANDLE file_handle = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+
+
+  if (file_handle != INVALID_HANDLE_VALUE) {
+    LARGE_INTEGER file_size;
+    if (GetFileSizeEx(file_handle, &file_size)) {
+      uint32_t file_size32 = safe_truncate_uint64(file_size.QuadPart);
+      result.contents = VirtualAlloc(0, file_size32, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+      if (result.contents) {
+        DWORD bytes_read;
+        if (ReadFile(file_handle, result.contents, file_size32, 
+              &bytes_read, 0) && (file_size32 == bytes_read)) {
+          result.contents_size = file_size32; 
+        } else {
+          DEBUGplatform_free_file_memory(result.contents);
+          result = {};
+        }
+      } else {
+        // TODO: logging 
+      }
+    } else {
+      // TODO: logging
+    }
+
+    CloseHandle(file_handle);
+  } else {
+      // TODO: logging
+  }
+
+
+  // BOOL CloseHandle(
+  //   hObject
+  // );
+
+  return result;
+}
+
+internal bool_32 DEBUGplatform_write_entire_file(char *filename, uint32_t memory_size, void *memory)
+{
+
+  bool_32 result = false; 
+  HANDLE file_handle = CreateFileA(filename, GENERIC_WRITE, 0, 0, CREATE_ALWAYS, 0, 0);
+
+
+  if (file_handle != INVALID_HANDLE_VALUE) {
+    DWORD bytes_writer;
+    if (WriteFile(file_handle, memory, memory_size, 
+          &bytes_writer, 0)) {
+         result = (bytes_writer == memory_size);
+    } else {
+      // TODO: logging
+    }
+
+    CloseHandle(file_handle);
+  } else {
+      // TODO: logging
+  }
+  return result;
+}
 
 internal win32_window_dimension win32_get_window_dim(HWND window) {
     RECT client_rect;
@@ -388,7 +463,8 @@ internal void win32_fill_sound_buffer(win32_sound_output *sound_output, DWORD by
     }
 }
 
-internal void win32_clear_buffer(win32_sound_output *sound_output) {
+internal void win32_clear_buffer(win32_sound_output *sound_output) 
+{
     void *region1;
     DWORD region1_size;
     void *region2;
@@ -436,9 +512,6 @@ int WINAPI WinMain(
     HINSTANCE hPrevInstance,
     PSTR lpCmdLine, 
     int nCmdShow)
-// #else
-// int main(int argc, char **argv)
-// #endif
 {
     // this is counts per second made
     LARGE_INTEGER pref_counter_freq_result;

@@ -27,6 +27,26 @@ typedef double real64;
 #define assert(expression)
 #endif
 
+
+#if HANDMADE_INTERNAL
+
+struct debug_read_file_result {
+  uint32_t contents_size;
+  void *contents;
+};
+
+internal void DEBUGplatform_free_file_memory(void *memory);
+internal debug_read_file_result DEBUGplatform_read_entire_file(char *filename);
+
+internal bool_32 DEBUGplatform_write_entire_file(char *filename, uint32_t memory_size, void *memory);
+#endif
+
+inline uint32_t safe_truncate_uint64(uint64_t value) {
+  assert(value <= 0xFFFFFFFF);
+  uint32_t result = (uint32_t)value;
+  return result;
+}
+
 struct game_offscreen_buffer {
     void *memory;
     int width;
